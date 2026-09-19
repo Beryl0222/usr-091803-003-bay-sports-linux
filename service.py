@@ -1,11 +1,14 @@
-"""湾区赛事协同台账的基础运行入口。"""
+"""湾区赛事协同台账运行入口。
+
+用法：
+  python3 service.py --check            基础配置自检
+  python3 service.py --port 8000        启动 HTTP 服务（/health 为健康检查）
+  python3 service.py --port 8000 --store data.jsonl   事件落盘，重启可回放
+"""
 
 import argparse
-import json
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-SERVICE_ID = "bay-sports"
-SERVICE_NAME = "湾区赛事协同台账"
+from baysports.api import App, Handler, SERVICE_ID, SERVICE_NAME, make_server
 
 
 def health_payload():
@@ -13,36 +16,28 @@ def health_payload():
     return {"status": "ok", "service": SERVICE_ID, "name": SERVICE_NAME}
 
 
-class Handler(BaseHTTPRequestHandler):
-    """提供健康检查，保留后续业务接口的明确入口。"""
-
-    def do_GET(self):
-        if self.path != "/health":
-            self.send_error(404)
-            return
-        body = json.dumps(health_payload(), ensure_ascii=False).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, *_args):
-        return
-
-
 def main():
     parser = argparse.ArgumentParser(description=SERVICE_NAME)
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--store", default=None, help="事件 JSONL 落盘路径")
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     if args.check:
         assert health_payload()["service"] == SERVICE_ID
+        # 装配根可构建，规则常量完整
+        app = App()
+        assert app.tournament is not None
         print("基础检查通过")
         return
-    ThreadingHTTPServer(("0.0.0.0", args.port), Handler).serve_forever()
+    server = make_server(args.host, args.port, App(store_path=args.store))
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":
     main()
-
